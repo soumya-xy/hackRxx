@@ -5,7 +5,6 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from app.core.config import settings
 from pinecone import Pinecone, ServerlessSpec
 import google.generativeai as genai
-from sentence_transformers import CrossEncoder
 
 # Set the environment variables for Google
 os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
@@ -25,8 +24,7 @@ class EmbeddingService:
     """
     def __init__(self):
         """
-        Initializes the EmbeddingService with embedding model, text splitter,
-        and reranker.
+        Initializes the EmbeddingService with embedding model and text splitter.
         """
         self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         
@@ -36,7 +34,6 @@ class EmbeddingService:
             separators=["\n\n", "\n", ". ", "; ", " ", ""]
         )
         
-        self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
         self.llm = ChatGoogleGenerativeAI(model="models/gemini-2.5-flash", temperature=0)
 
     async def upsert_document(self, document_text: str):
@@ -59,26 +56,22 @@ class EmbeddingService:
         docsearch = await PineconeVectorStore.afrom_documents(docs, self.embeddings, index_name=index_name)
         return docsearch
 
-    async def search_similar_clauses(self, query: str, top_k: int = 10):
+    async def search_similar_clauses(self, query: str, top_k: int = 5):
         """
-        Performs a similarity search in Pinecone and then reranks the results.
+        Performs a similarity search in Pinecone.
 
         Args:
             query (str): The query string for semantic search.
-            top_k (int): The number of top documents to retrieve initially from Pinecone.
+            top_k (int): The number of top documents to retrieve from Pinecone.
 
         Returns:
             list: A list of top-ranked Document objects (chunks).
         """
         docsearch = PineconeVectorStore.from_existing_index(index_name, self.embeddings)
         
-        # Retrieve a larger set of potential documents asynchronously
+        # Retrieve documents asynchronously
         retrieved_docs = await docsearch.asimilarity_search(query, k=top_k)
 
-        # Rerank the retrieved chunks for higher relevance
-        scores = self.reranker.predict([[query, doc.page_content] for doc in retrieved_docs])
-        ranked_docs = sorted(zip(retrieved_docs, scores), key=lambda x: x[1], reverse=True)
-
-        # Return only the top 5 most relevant chunks to the LLM
-        return [doc for doc, score in ranked_docs[:5]]
+        # Return the top documents directly (no reranking)
+        return retrieved_docs
 
